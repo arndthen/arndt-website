@@ -1,0 +1,153 @@
+---
+title: "My data exploration workflow"
+subtitle: ""
+excerpt: "In this post, I share a basic workflow I tend to use when I start to explore a new dataset."
+date: 2023-11-10
+author: "Henriette Arndt"
+draft: false
+images:
+series:
+tags:
+categories:
+layout: single
+---
+
+A necessary first step of almost any data analysis is to get familiar with the data through basic descriptive statistics and visualizations. In today's post, I want to share a basic workflow that I tend to use when I start to explore a new set of data. 
+
+We will use the packages janitor, psych, and kableExtra to create print-ready tables showing frequencies (for categorical factors) and descriptive statistics (for numerical variables). We will also use the `ggpairs()` function from theGGally package to produce plot matrices that are useful for exploring the distribution of, and basic relationships between different variables in a dataset. 
+
+## Get to grips with the dataset
+
+As an example we'll use the starwars data in the dplyr package, which contains information on the characters from all seven Star Wars movies. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Load library and data
+library(tidyverse)
+data(starwars)
+
+# View dataset contents
+glimpse(starwars)
+```
+As we can see, this dataset contains information on 14 variables (Columns) about 87 Star Wars characters (Rows), including categorical factors such as gender and species, as well as numerical variables such as height, mass, and birth year.
+
+## Summarize data
+### Categorical variables
+
+For category counts, I like to use [`tabyl( )`](https://cran.r-project.org/web/packages/janitor/vignettes/tabyls.html) from the janitor package, which provides frequency tables that are highly customizable and tie in well with other tidyverse functions. To look at just one variable, we can create a simple one-way frequency table: 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(janitor)
+
+one_way <- starwars %>% 
+  tabyl(species)
+head(one_way, 15)
+```
+Above, I printed just the first 15 rows, but the full table lists all 37 different species in the dataset, how often each of them occur, and their frequency as part of the total count (including NAs) and valid count (excluding NAs). As you can see, most species only include one character. With 35 and 6 characters each, Humans and Droids are the most frequently appearing species — so I'll focus on those in the following. 
+
+You may also wonder about the gender of the characters in this dataset, and whether the gender distribution is similar across Humans and Droids. We can look into it using a simple two-way frequency table produced by `tabyl()`. In the example below, I also use a series of `adorn_()` functions to add more useful features to the two-way table, which ends up looking like this: 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+two_way <- starwars %>%
+   # include only Humans and Droids
+   filter(species %in% c("Human", "Droid")) %>%
+   tabyl(species, gender) %>%
+   adorn_totals("row") %>% # bottom row with total counts
+   adorn_percentages("row") %>% # proportions by row
+   adorn_pct_formatting(digits = 0) %>% # round to whole number
+   adorn_ns() %>% # include raw counts
+   adorn_title("combined") # include both var names in first cell
+ 
+ two_way
+```
+Now, since `tabyl()` is based on tidyverse functions, we can pass on the output to the `kbl()` function from the [kableExtra](https://cran.r-project.org/web/packages/kableExtra/vignettes/awesome_table_in_html.html) package to produce an HTML table formatted for print, that we can copy from the R-Study Viewer directly into a Word document. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(kableExtra)
+
+two_way %>%
+   kbl() %>%
+   # apply print theme and font formatting
+   kable_classic(html_font = "Times New Roman",
+                 font_size = 12,
+                 full_width = F)
+```
+
+Perhaps unsurprisingly, the vast majority of  Human and Droid Star Wars characters are male (76%), although the distribution is even more skewed among Droids than Humans (83% vs. 74%). I'll leave it up to you how you want to interpret that information 😉 
+
+### Numerical variables
+For summarizing numerical variables, I tend to use the `describe()` function from the [psych](https://www.rdocumentation.org/packages/psych/versions/1.0-17/topics/00psych-package) package. This gives a good range of descriptive statistics, but I manually add columns for the lower and upper bounds of the 95% confidence interval around the mean and the number of missing values (NAs), since those are usually required in publications in my field. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(psych)
+
+descr <- starwars %>%
+  select(where(is.numeric)) %>% 
+  describe() %>% 
+  # turn into tibble for further formatting
+  as_tibble(
+    # add column with rownames (= variable names)
+    rownames = "varname") %>%
+  select(-vars) %>%
+  # count NAs 
+  mutate(missing = nrow(starwars) - n,
+         .after = n) %>%
+  # calculate 95% CI around mean
+  mutate(CImin = mean - (1.96 * se),
+         CImax = mean + (1.96 * se),
+         .after = mean)
+descr
+```
+
+Now we have a nice data frame with our descriptive statistics. As before, `kbl()` is a useful way to turn this data frame into a formatted table ready to be copy-pasted into your main document. These are the steps I normally go through to produce a table compliant with publication guidelines in my field:
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+descr %>%
+   # select and order summary stats
+   select(varname, n, missing, min, max, mean, CImin, CImax, 
+          sd, skew, kurtosis) %>%
+   # change row names
+   mutate(varname = factor(varname,
+          # current names
+          levels = c("height", "mass", "birth_year"),
+          # names in print
+          labels = c("Height", "Weight", "Birth Year"))) %>%
+   kbl(digits = 2, # round to two decimals
+       # change column names
+       col.names = c("Variable", "n", "NA", "min", "max", "mean",
+                   "CImin", "CImax", "sd", "skewn.", "kurt.")) %>%
+   # apply print theme and font formatting
+   kable_classic(html_font = "Times New Roman",
+                 font_size = 12,
+                 full_width = F)
+```
+
+As indicated by the skewness and kurtosis values, height seems to be roughly normally distributed, but something weird is going on with Weight and Birth Year. Visualizations are a good way to figure out what might be happening here. 
+
+## Visualize data
+Instead of plotting each variable separately, I like to use the `ggpairs()` function from the GGally package [equivalent to `pairs()` from baseR] to produce plot matrices that are useful for exploring the distribution of, and basic relationships between different variables in a dataset. 
+
+Since the plot will become difficult to read the more variables we include, we'll just focus on some we've already looked at. I excluded the species variable here, because `ggpairs()` by default will not plot variables with more than 15 categories. 
+
+```{r echo=TRUE, fig.width=12, message=FALSE, warning=FALSE}
+library(GGally)
+
+starwars %>%
+   select(height, mass, birth_year, gender) %>%
+   ggpairs()
+```
+
+These visualizations make it very easy to understand the way in which the mass and birth_year data are non-normally distributed: Both variables contain outliers at the very upper end of the value range. If we remove these, we can see that mass and birth_year are now somewhat more normally distributed, and both show significant correlations with height (but not with each other).
+
+```{r echo=TRUE, fig.width=12, message=FALSE, warning=FALSE}
+starwars %>%
+   # de-select outliers
+   filter(mass < 1000,
+          birth_year < 250) %>%
+   select(height, mass, birth_year, gender) %>%
+   ggpairs()
+```
+
+Of course there are many more ways to get familiar with a new dataset, but I wanted to show you some of the most basic steps that I go through today. In my next post, I will show you my preferred way to visualize the distribution of numerical variables.
+
+## Full code
+As always, you can download an R script with the entire code for this post from [my GitHub page](https://github.com/arndthen/rblog).

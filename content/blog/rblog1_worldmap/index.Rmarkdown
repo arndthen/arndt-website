@@ -1,0 +1,103 @@
+---
+title: "World map visualization with ggplot2"
+subtitle: ""
+excerpt: "I show you how to create world map plots in the tidyverse, which you can easily adapt to visualize many types of data by country, including continuous and categorical variables."
+date: 2022-12-07
+author: "Henriette Arndt"
+draft: false
+images:
+layout: single
+---
+
+While working on findings from a recent Systematic Review, I wanted to create a visualization which shows the number of studies on our research topic which had been conducted in different countries around the world. 
+
+Below, I explain the code I used to create this map plot within the tidyverse, which you can easily adapt to visualize many other types of data by country, including continuous (e.g., population counts) and categorical variables (e.g., dominant language).
+
+![An example visualization: World map with countries coloured according to number of studies](featured.png)
+
+The ggplot2 `geom_map()` function requires two sets of data: one with geographical specifications (country borders) and one with the data you want to visualize by country.
+
+## Geographical data
+
+The `map_data()` function turns geographical data from the maps package into a tibble for plotting with ggplot2. To avoid needlessly including Antarctica in my plot, I removed it using dplyr's `filter()` function.
+
+Because of the way that our Systematic Review data were coded, I also needed to make another change to the geographical data set. While we had counted studies conducted in Hong Kong as separate from those in mainland China, the maps data lists Hong Kong as a subregion of the region (country) China. To be able to display separate statistics for both regions, I used `mutate()` and `case_when()` to recode Hong Kong as a region in the geographical data set. 
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+
+# Geographical data
+world_map <- map_data("world") %>%
+  # remove Antarctica
+  filter(! region == "Antarctica") %>%
+  # recode Hong Kong as region
+  mutate(region = 
+           case_when(
+             # if subregion is HK, change region
+             subregion == "Hong Kong" ~ "Hong Kong",
+             # else retain original string
+             TRUE ~ region
+           )
+  )
+```
+
+
+## Data by country
+
+In order to plot geographical data, `geom_map()` requires a second data set with a list of countries and a variable of interest which determines how each corresponding area should be filled in.
+
+I started by extracting a list of all countries included in the world_map data set, which I then joined with the data I wanted to visualize (count of studies conducted in various countries). Of course, you can use whatever other data you have for each country – just make sure that the names match those in the countries list. 
+
+```{r message=FALSE, warning=FALSE}
+# List of countries
+countries <- world_map %>%
+  distinct(region)
+
+# Data by country
+data <- tibble(region = 
+                 c("Armenia", "Australia", "Austria", "Belgium", "Brazil", 
+                   "Chile", "China", "Croatia", "Denmark", "Finland", 
+                   "France", "Germany", "Greece", "Hong Kong", "Indonesia", 
+                   "Iran", "Japan", "Malaysia", "Mexico", "Morocco", "Netherlands", 
+                   "Norway", "Poland", "Russia", "Saudi Arabia", "Slovakia", 
+                   "Slovenia", "South Korea", "Spain", "Sweden", "Taiwan", 
+                   "Thailand", "Turkey", "UK", "USA", "Vietnam"),
+               study.count =
+                 c(1, 6, 3, 7, 2, 2, 3, 3, 3, 10, 19, 5, 4, 17, 5, 3, 6, 4, 2, 1, 
+                   4, 3, 2, 2, 6, 1, 2, 13, 9, 14, 3, 1, 2, 4, 7, 1)
+)
+
+# Join
+data <- full_join(countries, data, by = join_by(region))
+```
+
+
+## Visualization
+
+As I said before, `geom_map()` requires two data sets. The geographical data goes inside `geom_map()` itself. The data you want to visualize is the first argument to `ggplot()`.  Specify which variable to visualize as colour on your map with fill = var. 
+
+`expand_limits()` ensures that ggplot2 includes the full range of geographical coordinates in our plot (visualizes the entire map). `theme_map()` from ggthemes removes the background and other unnecessary plot elements (e.g., x and y axis). 
+
+Finally, I adjusted the legend position to get rid of unnecessary white space to the left of the map and used `scale_fill_viridis()` from the viridis package to change the fill to a colour-blind friendly palette (add discrete = TRUE when visualizing categorical data). 
+
+```{r fig.width=12, message=FALSE, warning=FALSE}
+library(viridis)
+library(ggthemes)
+
+data %>% 
+  ggplot(aes(
+    # variable to visualize
+    fill = study.count, 
+    map_id = region)) +
+  geom_map(map = world_map) +
+  expand_limits(x = world_map$long, y = world_map$lat) +
+  theme_map() +
+  # legend position
+  theme(legend.position = c(0.1, 0.3)) +
+  # colour-blind friendly palette
+  scale_fill_viridis(option = "plasma", direction = -1)
+```
+
+## Full code
+
+You can download an R script with the entire code for this post from [my GitHub page](https://github.com/arndthen/rblog).
